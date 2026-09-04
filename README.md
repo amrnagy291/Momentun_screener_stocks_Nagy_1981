@@ -53,7 +53,7 @@ anything any tab shows you.
 | `momentum_calc.py` | Pure math: all the momentum/technical factor calculations |
 | `vcp_calc.py` | Pure math: the VCP (Volatility Contraction Pattern) detection and scoring |
 | `unusual_activity_calc.py` | Pure math: single-day price-change % and relative-volume detection |
-| `data_fetch.py` | Gets the S&P 500 ticker list and downloads price history via `yfinance` |
+| `data_fetch.py` | Gets the ticker list (S&P 500 or all US stocks) and downloads price history via `yfinance` |
 | `requirements.txt` | Python packages needed |
 | `test_momentum_calc.py` | Sanity checks for the momentum math, using synthetic price data (no internet needed) |
 | `test_vcp_calc.py` | Sanity checks for VCP detection, using a hand-built synthetic contraction pattern (no internet needed) |
@@ -81,15 +81,24 @@ streamlit run app.py
 
 This opens the dashboard in your browser (usually `http://localhost:8501`).
 Click **"🔄 Fetch data / Refresh"** in the sidebar the first time — it will
-download the S&P 500 ticker list from Wikipedia and 2 years of daily price
-history for each stock via Yahoo Finance. With the default 150-stock universe
-this usually takes 30-90 seconds; the full 500 takes a few minutes. Results
-are cached for an hour so you don't re-download every time you tweak a slider.
+download the ticker list and 2 years of daily price history for each stock
+via Yahoo Finance. With the default S&P 500 / 150-stock universe this usually
+takes 30-90 seconds; the full 500 takes a few minutes. Results are cached
+until your next refresh so you don't re-download every time you tweak a slider.
+
+**Universe source:** choose **S&P 500** (fast, ~500 stocks, good for everyday
+use) or **All US Stocks** in the sidebar. The latter pulls essentially every
+NYSE + Nasdaq common stock (several thousand tickers, via NASDAQ Trader's
+official symbol directory) — ETFs and SPAC warrants/units are filtered out,
+but this is a much bigger download: scanning a few hundred still takes a
+minute or two, and the full multi-thousand-ticker list can take 30+ minutes.
+Start with a smaller number on this slider even when using "All US Stocks."
 
 ## How to use it
 
-1. Set the **universe size** (how many S&P 500 stocks to scan — start smaller
-   while you're experimenting, then increase).
+1. Pick your **universe source** (S&P 500 or All US Stocks) and **universe
+   size** (how many stocks to scan — start smaller while you're experimenting,
+   then increase).
 2. Adjust the **factor weights** to emphasize what matters to you — e.g. crank
    up "Relative strength" if you specifically care about market-beating stocks,
    or "Short-term technical signals" if you're more of a swing trader.
@@ -99,6 +108,8 @@ are cached for an hour so you don't re-download every time you tweak a slider.
    breakdown by category so you can see *why* a stock scored well.
 5. Pick any ticker from the dropdown to see its price chart with 50/200-day
    moving averages and its individual metrics.
+6. Switch to the **VCP Scanner** or **Unusual Activity** tabs for the other
+   two screens — see their descriptions above.
 
 ## Before you rely on this for real trading
 
@@ -112,10 +123,16 @@ are cached for an hour so you don't re-download every time you tweak a slider.
   position sizing, stop-losses, sector/correlation risk, fundamentals,
   earnings dates, or transaction costs — all things a real trading plan
   needs.
-- **The S&P 500 ticker list is fetched live from Wikipedia** each hour; if
-  that fails (no internet, page changes), it silently falls back to a static
-  list embedded in `data_fetch.py`, which will drift out of date over time.
-  If your results look off, check `data_fetch.get_sp500_tickers()`.
+- **Ticker lists are fetched live** each hour — the S&P 500 list from
+  Wikipedia, the All US Stocks list from NASDAQ Trader's official symbol
+  directory. If either fails (no internet, page/file format changes), it
+  silently falls back to a static list embedded in `data_fetch.py`, which
+  will drift out of date over time. If your results look off, check
+  `data_fetch.get_sp500_tickers()` / `data_fetch.get_all_us_tickers()`.
+- **"All US Stocks" still isn't literally every security.** It excludes
+  ETFs, test/placeholder issues, and obvious SPAC warrants/units/rights (by
+  name, not by symbol pattern), and it doesn't cover OTC/pink-sheet stocks —
+  just NYSE and Nasdaq-listed common stock.
 
 ## Customizing further
 

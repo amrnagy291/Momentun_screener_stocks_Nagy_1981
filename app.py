@@ -43,6 +43,11 @@ def load_tickers() -> list[str]:
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
+def load_all_us_tickers() -> list[str]:
+    return data_fetch.get_all_us_tickers()
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
 def load_price_history(tickers: tuple[str, ...]) -> dict[str, pd.DataFrame]:
     return data_fetch.download_price_history(list(tickers))
 
@@ -80,11 +85,35 @@ def compute_unusual(price_data: dict[str, pd.DataFrame]) -> pd.DataFrame:
 st.sidebar.title("Momentum Screener")
 
 st.sidebar.subheader("Universe")
-universe_size = st.sidebar.slider(
-    "Number of S&P 500 stocks to scan",
-    min_value=50, max_value=500, value=150, step=25,
-    help="Smaller = faster to download. Start small to test, then go up to the full 500.",
+universe_source = st.sidebar.radio(
+    "Universe source",
+    ["S&P 500", "All US Stocks (NYSE + Nasdaq)"],
+    help=(
+        "All US Stocks is several thousand tickers (NYSE + Nasdaq, ETFs and SPAC "
+        "warrants/units excluded) -- much slower to download than the S&P 500 and "
+        "more likely to hit an occasional individual-ticker hiccup (skipped automatically)."
+    ),
 )
+
+if universe_source == "S&P 500":
+    universe_size = st.sidebar.slider(
+        "Number of S&P 500 stocks to scan",
+        min_value=50, max_value=500, value=150, step=25,
+        help="Smaller = faster to download. Start small to test, then go up to the full 500.",
+    )
+else:
+    universe_size = st.sidebar.slider(
+        "Number of stocks to scan",
+        min_value=100, max_value=6000, value=500, step=100,
+        help=(
+            "The full list is 6000+ tickers and can take 30+ minutes to download. "
+            "Start smaller (a few hundred) to test before going wide."
+        ),
+    )
+    st.sidebar.caption(
+        f"⏱️ Scanning {universe_size} stocks from the full US market will take noticeably "
+        "longer than the S&P 500 option -- budget several minutes or more."
+    )
 
 st.sidebar.subheader("Factor weights")
 st.sidebar.caption("Adjust how much each category contributes to the final Momentum Score.")
@@ -120,9 +149,10 @@ st.sidebar.caption(
 
 st.title("📈 Momentum Stock Screener")
 st.write(
-    "Ranks S&P 500 stocks by a composite **Momentum Score (0-100)** combining price momentum, "
-    "relative strength vs the market, trend/volume confirmation, and short-term technical signals. "
-    "This is a research tool, not financial advice."
+    "Scans either the S&P 500 or the full US stock market (your choice in the sidebar) and ranks "
+    "stocks by a composite **Momentum Score (0-100)** combining price momentum, relative strength "
+    "vs the market, trend/volume confirmation, and short-term technical signals -- plus VCP pattern "
+    "and unusual-activity scanners in the other tabs. This is a research tool, not financial advice."
 )
 
 if "price_data" not in st.session_state:
@@ -131,8 +161,9 @@ if "factors_df" not in st.session_state:
     st.session_state.factors_df = None
 
 if refresh or st.session_state.price_data is None:
-    with st.spinner("Fetching S&P 500 ticker list..."):
-        all_tickers = load_tickers()
+    fetch_label = "Fetching S&P 500 ticker list..." if universe_source == "S&P 500" else "Fetching full US market ticker list..."
+    with st.spinner(fetch_label):
+        all_tickers = load_tickers() if universe_source == "S&P 500" else load_all_us_tickers()
     tickers = all_tickers[:universe_size]
 
     progress_bar = st.progress(0.0, text="Downloading price history...")

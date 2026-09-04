@@ -35,6 +35,8 @@ class FakeSidebar:
         return k.get("value", 0.0)
     def checkbox(self, label, *a, **k):
         return k.get("value", False)
+    def radio(self, label, options, *a, **k):
+        return options[k.get("index", 0)] if len(options) else None
     def button(self, *a, **k):
         return False  # simulate: user hasn't clicked refresh
 
