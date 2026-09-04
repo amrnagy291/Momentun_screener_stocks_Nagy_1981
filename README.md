@@ -1,7 +1,7 @@
 # Momentum Stock Screener
 
-A local web dashboard that scans the S&P 500 and ranks stocks two ways, in
-two tabs:
+A local web dashboard that scans the S&P 500 and ranks stocks three ways, in
+three tabs:
 
 - **📈 Momentum Screener** — ranks stocks by a composite **Momentum Score
   (0-100)**, combining:
@@ -30,12 +30,20 @@ two tabs:
   annotated chart (swing highs/lows and the pivot line) before trusting a
   result.
 
-**This is an educational/research tool, not financial advice.** Momentum and
-VCP-style strategies can reverse or fail sharply, past performance doesn't
-predict future results, and neither screener accounts for fees, taxes,
-slippage, or your personal risk tolerance. Always do your own research (or
-talk to a licensed financial advisor) before acting on anything either tab
-shows you.
+- **⚡ Unusual Activity** — flags stocks with an outsized single-day price
+  move (up or down, your threshold — default 5%) combined with volume well
+  above their typical recent level (your threshold — default 2x the trailing
+  50-day average). Based only on the most recent trading day, unlike the
+  other two tabs' multi-week patterns. A price/volume spike can mean real
+  news or just noise — this tab surfaces candidates for you to research, it
+  doesn't tell you why a stock moved.
+
+**This is an educational/research tool, not financial advice.** Momentum,
+VCP, and volume/price-spike strategies can all reverse or fail sharply, past
+performance doesn't predict future results, and none of these screeners
+account for fees, taxes, slippage, or your personal risk tolerance. Always do
+your own research (or talk to a licensed financial advisor) before acting on
+anything any tab shows you.
 
 ## What's in this folder
 
@@ -44,10 +52,12 @@ shows you.
 | `app.py` | The Streamlit dashboard (what you actually run) |
 | `momentum_calc.py` | Pure math: all the momentum/technical factor calculations |
 | `vcp_calc.py` | Pure math: the VCP (Volatility Contraction Pattern) detection and scoring |
+| `unusual_activity_calc.py` | Pure math: single-day price-change % and relative-volume detection |
 | `data_fetch.py` | Gets the S&P 500 ticker list and downloads price history via `yfinance` |
 | `requirements.txt` | Python packages needed |
 | `test_momentum_calc.py` | Sanity checks for the momentum math, using synthetic price data (no internet needed) |
 | `test_vcp_calc.py` | Sanity checks for VCP detection, using a hand-built synthetic contraction pattern (no internet needed) |
+| `test_unusual_activity_calc.py` | Sanity checks for the unusual-activity math, using synthetic price/volume spikes (no internet needed) |
 | `test_app_smoke.py` | End-to-end dry run of the app's logic with fake data (no internet needed) |
 
 ## Setup (one-time)

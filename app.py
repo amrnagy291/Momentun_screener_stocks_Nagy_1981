@@ -28,6 +28,7 @@ import streamlit as st
 import data_fetch
 import momentum_calc as mc
 import vcp_calc as vc
+import unusual_activity_calc as ua
 
 st.set_page_config(page_title="Momentum Stock Screener", layout="wide")
 
@@ -65,6 +66,11 @@ def compute_factors(price_data: dict[str, pd.DataFrame]) -> pd.DataFrame:
 @st.cache_data(show_spinner=False)
 def compute_vcp(price_data: dict[str, pd.DataFrame], window: int) -> pd.DataFrame:
     return vc.compute_universe_vcp(price_data, data_fetch.BENCHMARK_TICKER, window=window)
+
+
+@st.cache_data(show_spinner=False)
+def compute_unusual(price_data: dict[str, pd.DataFrame]) -> pd.DataFrame:
+    return ua.compute_universe_unusual_activity(price_data, data_fetch.BENCHMARK_TICKER)
 
 
 # ---------------------------------------------------------------------------
@@ -171,7 +177,9 @@ if st.session_state.price_data:
 
     total_downloaded = len(st.session_state.price_data) if st.session_state.price_data else 0
 
-    tab_momentum, tab_vcp = st.tabs(["📈 Momentum Screener", "🔎 VCP Scanner"])
+    tab_momentum, tab_vcp, tab_unusual = st.tabs(
+        ["📈 Momentum Screener", "🔎 VCP Scanner", "⚡ Unusual Activity"]
+    )
 
     # -----------------------------------------------------------------
     # Momentum Screener tab
@@ -447,5 +455,124 @@ red markers, swing lows are green, the pivot is the dashed line) before trusting
 treat this as a starting point for further research, not a trading signal.
                 """
             )
+
+    # -----------------------------------------------------------------
+    # Unusual Activity tab
+    # -----------------------------------------------------------------
+    with tab_unusual:
+        st.write(
+            "Flags stocks with an outsized **single-day price move combined with volume well "
+            "above their typical level** — the classic 'something's going on with this stock' "
+            "signal. Based on the most recent trading day only (not the multi-week patterns the "
+            "other two tabs look for)."
+        )
+
+        uctrl1, uctrl2, uctrl3 = st.columns(3)
+        min_price_change = uctrl1.slider(
+            "Minimum price change (%)", 1, 20, 5,
+            help="Flags days where the stock moved at least this much, up or down.",
+        )
+        min_rel_volume = uctrl2.slider(
+            "Minimum relative volume", 1.0, 5.0, 2.0, step=0.1,
+            help="Today's volume divided by its trailing 50-day average. 2.0x = twice the usual volume.",
+        )
+        direction = uctrl3.selectbox("Direction", ["Both", "Gainers only", "Losers only"])
+
+        with st.spinner("Scanning for unusual volume/price activity..."):
+            unusual_all = compute_unusual(st.session_state.price_data)
+
+        if unusual_all.empty:
+            st.warning("No stocks had enough history to scan for unusual activity.")
+        else:
+            valid = unusual_all[unusual_all["price_change_pct"].notna() & unusual_all["relative_volume"].notna()]
+            candidates = valid[valid["relative_volume"] >= min_rel_volume]
+            if direction == "Gainers only":
+                candidates = candidates[candidates["price_change_pct"] >= min_price_change]
+            elif direction == "Losers only":
+                candidates = candidates[candidates["price_change_pct"] <= -min_price_change]
+            else:
+                candidates = candidates[candidates["price_change_pct"].abs() >= min_price_change]
+
+            candidates = candidates.sort_values("unusual_score", ascending=False).reset_index(drop=True)
+            if not candidates.empty:
+                candidates.insert(0, "rank", np.arange(1, len(candidates) + 1))
+
+            st.caption(
+                f"Scanned {len(unusual_all)} stocks · {len(candidates)} match current filters"
+            )
+
+            if candidates.empty:
+                st.warning(
+                    "No stocks match the current filters. Try lowering the minimum price change "
+                    "or relative volume, or widening the universe size."
+                )
+            else:
+                unusual_display_cols = {
+                    "rank": "Rank",
+                    "ticker": "Ticker",
+                    "last_price": "Price",
+                    "price_change_pct": "Price Change %",
+                    "relative_volume": "Relative Volume",
+                    "last_volume": "Volume",
+                    "unusual_score": "Unusual Score",
+                }
+                unusual_table = candidates[list(unusual_display_cols.keys())].rename(columns=unusual_display_cols)
+
+                st.dataframe(
+                    unusual_table.style.format(
+                        {
+                            "Price": "${:.2f}",
+                            "Price Change %": "{:+.1f}%",
+                            "Relative Volume": "{:.2f}x",
+                            "Volume": "{:,.0f}",
+                            "Unusual Score": "{:.1f}",
+                        },
+                        na_rep="—",
+                    ).background_gradient(subset=["Unusual Score"], cmap="Oranges"),
+                    use_container_width=True,
+                    hide_index=True,
+                    height=min(700, 45 * (len(unusual_table) + 1)),
+                )
+
+                st.subheader("Inspect a mover")
+                unusual_selected = st.selectbox(
+                    "Pick a ticker from the list above", candidates["ticker"].tolist(), key="unusual_select"
+                )
+
+                if unusual_selected:
+                    row = candidates[candidates["ticker"] == unusual_selected].iloc[0]
+                    df = st.session_state.price_data[unusual_selected]
+
+                    c1, c2, c3, c4 = st.columns(4)
+                    c1.metric("Price Change", f"{row['price_change_pct']:+.1f}%")
+                    c2.metric("Relative Volume", f"{row['relative_volume']:.2f}x average")
+                    c3.metric("Latest Volume", f"{row['last_volume']:,.0f}")
+                    c4.metric("Unusual Score", f"{row['unusual_score']:.1f}")
+
+                    price_fig = go.Figure()
+                    price_fig.add_trace(go.Scatter(x=df.index[-90:], y=df["Close"].iloc[-90:], name="Close",
+                                                     line=dict(color="#2E7D32")))
+                    price_fig.update_layout(
+                        title=f"{unusual_selected} — last 90 trading days",
+                        height=320, margin=dict(l=20, r=20, t=50, b=20),
+                    )
+                    st.plotly_chart(price_fig, use_container_width=True)
+
+                    vol_fig = go.Figure()
+                    vol_colors = ["#EF5350" if i == len(df.iloc[-90:]) - 1 else "#90A4AE"
+                                  for i in range(len(df.iloc[-90:]))]
+                    vol_fig.add_trace(go.Bar(x=df.index[-90:], y=df["Volume"].iloc[-90:], marker_color=vol_colors,
+                                              name="Volume"))
+                    vol_fig.update_layout(
+                        title="Volume (today highlighted)",
+                        height=220, margin=dict(l=20, r=20, t=40, b=20),
+                    )
+                    st.plotly_chart(vol_fig, use_container_width=True)
+
+        st.caption(
+            "⚡ A volume/price spike can mean news, earnings, an analyst call, or nothing more "
+            "than noise — this tab flags candidates for you to research, it doesn't tell you why "
+            "they moved. Always check for a news catalyst before acting on anything here."
+        )
 else:
     st.info("Click **Fetch data / Refresh** in the sidebar to scan the market.")

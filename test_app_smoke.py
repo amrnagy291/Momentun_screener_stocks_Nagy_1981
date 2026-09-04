@@ -49,6 +49,8 @@ class FakeColumn:
         return k.get("value", False)
     def number_input(self, label, *a, **k):
         return k.get("value", 0.0)
+    def selectbox(self, label, options, *a, **k):
+        return options[0] if len(options) else None
     def __enter__(self): return self
     def __exit__(self, *a): return False
 
@@ -163,8 +165,12 @@ def install_fake_plotly():
     class FakeScatter:
         def __init__(self, *a, **k): pass
 
+    class FakeBar:
+        def __init__(self, *a, **k): pass
+
     go.Figure = FakeFigure
     go.Scatter = FakeScatter
+    go.Bar = FakeBar
 
     plotly_pkg = types.ModuleType("plotly")
     plotly_pkg.graph_objects = go
