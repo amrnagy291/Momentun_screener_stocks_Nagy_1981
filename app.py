@@ -20,12 +20,14 @@ from __future__ import annotations
 
 import time
 
+import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
 import data_fetch
 import momentum_calc as mc
+import vcp_calc as vc
 
 st.set_page_config(page_title="Momentum Stock Screener", layout="wide")
 
@@ -58,6 +60,11 @@ def compute_factors(price_data: dict[str, pd.DataFrame]) -> pd.DataFrame:
         factors["ticker"] = ticker
         rows.append(factors)
     return pd.DataFrame(rows)
+
+
+@st.cache_data(show_spinner=False)
+def compute_vcp(price_data: dict[str, pd.DataFrame], window: int) -> pd.DataFrame:
+    return vc.compute_universe_vcp(price_data, data_fetch.BENCHMARK_TICKER, window=window)
 
 
 # ---------------------------------------------------------------------------
@@ -162,91 +169,99 @@ if st.session_state.price_data:
         st.warning("No stocks had enough history to score. Try increasing the universe size.")
         st.stop()
 
-    ranked = mc.rank_universe(factors_df, weights)
-
-    # apply filters
-    filtered = ranked[ranked["last_price"] >= min_price]
-    if require_uptrend:
-        filtered = filtered[filtered["above_200ma"]]
-    filtered = filtered.head(top_n)
-
     total_downloaded = len(st.session_state.price_data) if st.session_state.price_data else 0
-    st.caption(
-        f"Scanned {len(factors_df)} stocks · {total_downloaded} "
-        f"total tickers downloaded · showing top {len(filtered)} after filters"
-    )
 
-    if filtered.empty:
-        st.warning("No stocks match the current filters. Try lowering the minimum price or unchecking the uptrend filter.")
-        st.stop()
+    tab_momentum, tab_vcp = st.tabs(["📈 Momentum Screener", "🔎 VCP Scanner"])
 
-    display_cols = {
-        "rank": "Rank",
-        "ticker": "Ticker",
-        "last_price": "Price",
-        "momentum_score": "Momentum Score",
-        "score_price_momentum": "Price Mom.",
-        "score_relative_strength": "Rel. Strength",
-        "score_trend_volume": "Trend/Vol",
-        "score_short_term_technical": "Technicals",
-        "momentum_12_1": "12-1mo Return",
-        "rs_3m": "RS 3mo",
-        "pct_off_52w_high": "% Off 52w High",
-        "rsi": "RSI",
-    }
-    table = filtered[list(display_cols.keys())].rename(columns=display_cols)
+    # -----------------------------------------------------------------
+    # Momentum Screener tab
+    # -----------------------------------------------------------------
+    with tab_momentum:
+        ranked = mc.rank_universe(factors_df, weights)
 
-    st.dataframe(
-        table.style.format(
-            {
-                "Price": "${:.2f}",
-                "Momentum Score": "{:.1f}",
-                "Price Mom.": "{:.1f}",
-                "Rel. Strength": "{:.1f}",
-                "Trend/Vol": "{:.1f}",
-                "Technicals": "{:.1f}",
-                "12-1mo Return": "{:+.1%}",
-                "RS 3mo": "{:+.1%}",
-                "% Off 52w High": "{:.1f}%",
-                "RSI": "{:.0f}",
-            },
-            na_rep="—",
-        ).background_gradient(subset=["Momentum Score"], cmap="Greens"),
-        use_container_width=True,
-        hide_index=True,
-        height=min(700, 45 * (len(table) + 1)),
-    )
+        # apply filters
+        filtered = ranked[ranked["last_price"] >= min_price]
+        if require_uptrend:
+            filtered = filtered[filtered["above_200ma"]]
+        filtered = filtered.head(top_n)
 
-    st.subheader("Inspect a stock")
-    selected = st.selectbox("Pick a ticker from the ranked list above", filtered["ticker"].tolist())
-
-    if selected:
-        row = filtered[filtered["ticker"] == selected].iloc[0]
-        df = st.session_state.price_data[selected]
-
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Momentum Score", f"{row['momentum_score']:.1f} / 100")
-        col2.metric("12-1mo Return", f"{row['momentum_12_1']:+.1%}" if pd.notna(row["momentum_12_1"]) else "—")
-        col3.metric("RSI (14)", f"{row['rsi']:.0f}" if pd.notna(row["rsi"]) else "—")
-        col4.metric("% Off 52w High", f"{row['pct_off_52w_high']:.1f}%" if pd.notna(row["pct_off_52w_high"]) else "—")
-
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(x=df.index, y=df["Close"], name="Close", line=dict(color="#2E7D32")))
-        fig.add_trace(go.Scatter(x=df.index, y=df["Close"].rolling(50).mean(), name="50-day MA",
-                                  line=dict(color="#1976D2", dash="dot")))
-        fig.add_trace(go.Scatter(x=df.index, y=df["Close"].rolling(200).mean(), name="200-day MA",
-                                  line=dict(color="#E65100", dash="dot")))
-        fig.update_layout(
-            title=f"{selected} — price with 50/200-day moving averages",
-            height=420,
-            margin=dict(l=20, r=20, t=50, b=20),
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        st.caption(
+            f"Scanned {len(factors_df)} stocks · {total_downloaded} "
+            f"total tickers downloaded · showing top {len(filtered)} after filters"
         )
-        st.plotly_chart(fig, use_container_width=True)
 
-    with st.expander("How the Momentum Score is built"):
-        st.markdown(
-            """
+        if filtered.empty:
+            st.warning("No stocks match the current filters. Try lowering the minimum price or unchecking the uptrend filter.")
+        else:
+            display_cols = {
+                "rank": "Rank",
+                "ticker": "Ticker",
+                "last_price": "Price",
+                "momentum_score": "Momentum Score",
+                "score_price_momentum": "Price Mom.",
+                "score_relative_strength": "Rel. Strength",
+                "score_trend_volume": "Trend/Vol",
+                "score_short_term_technical": "Technicals",
+                "momentum_12_1": "12-1mo Return",
+                "rs_3m": "RS 3mo",
+                "pct_off_52w_high": "% Off 52w High",
+                "rsi": "RSI",
+            }
+            table = filtered[list(display_cols.keys())].rename(columns=display_cols)
+
+            st.dataframe(
+                table.style.format(
+                    {
+                        "Price": "${:.2f}",
+                        "Momentum Score": "{:.1f}",
+                        "Price Mom.": "{:.1f}",
+                        "Rel. Strength": "{:.1f}",
+                        "Trend/Vol": "{:.1f}",
+                        "Technicals": "{:.1f}",
+                        "12-1mo Return": "{:+.1%}",
+                        "RS 3mo": "{:+.1%}",
+                        "% Off 52w High": "{:.1f}%",
+                        "RSI": "{:.0f}",
+                    },
+                    na_rep="—",
+                ).background_gradient(subset=["Momentum Score"], cmap="Greens"),
+                use_container_width=True,
+                hide_index=True,
+                height=min(700, 45 * (len(table) + 1)),
+            )
+
+            st.subheader("Inspect a stock")
+            selected = st.selectbox(
+                "Pick a ticker from the ranked list above", filtered["ticker"].tolist(), key="momentum_select"
+            )
+
+            if selected:
+                row = filtered[filtered["ticker"] == selected].iloc[0]
+                df = st.session_state.price_data[selected]
+
+                col1, col2, col3, col4 = st.columns(4)
+                col1.metric("Momentum Score", f"{row['momentum_score']:.1f} / 100")
+                col2.metric("12-1mo Return", f"{row['momentum_12_1']:+.1%}" if pd.notna(row["momentum_12_1"]) else "—")
+                col3.metric("RSI (14)", f"{row['rsi']:.0f}" if pd.notna(row["rsi"]) else "—")
+                col4.metric("% Off 52w High", f"{row['pct_off_52w_high']:.1f}%" if pd.notna(row["pct_off_52w_high"]) else "—")
+
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(x=df.index, y=df["Close"], name="Close", line=dict(color="#2E7D32")))
+                fig.add_trace(go.Scatter(x=df.index, y=df["Close"].rolling(50).mean(), name="50-day MA",
+                                          line=dict(color="#1976D2", dash="dot")))
+                fig.add_trace(go.Scatter(x=df.index, y=df["Close"].rolling(200).mean(), name="200-day MA",
+                                          line=dict(color="#E65100", dash="dot")))
+                fig.update_layout(
+                    title=f"{selected} — price with 50/200-day moving averages",
+                    height=420,
+                    margin=dict(l=20, r=20, t=50, b=20),
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                )
+                st.plotly_chart(fig, use_container_width=True)
+
+            with st.expander("How the Momentum Score is built"):
+                st.markdown(
+                    """
 Each stock gets a **percentile rank (0-100) within the scanned universe** for every underlying
 signal, then those are blended into four category scores, which are combined using your
 sidebar weights into the final **Momentum Score**:
@@ -263,13 +278,174 @@ sidebar weights into the final **Momentum Score**:
 
 A score of 100 in a category means "best in the scanned universe on that dimension right now" —
 scores are relative to the other stocks scanned, not absolute thresholds.
-            """
+                    """
+                )
+
+        st.caption(
+            "⚠️ Educational tool only, not investment advice. Momentum strategies can reverse "
+            "sharply and past performance doesn't predict future results. Data via Yahoo Finance "
+            "(yfinance), end-of-day, may contain gaps or delays."
         )
 
-    st.caption(
-        "⚠️ Educational tool only, not investment advice. Momentum strategies can reverse "
-        "sharply and past performance doesn't predict future results. Data via Yahoo Finance "
-        "(yfinance), end-of-day, may contain gaps or delays."
-    )
+    # -----------------------------------------------------------------
+    # VCP Scanner tab
+    # -----------------------------------------------------------------
+    with tab_vcp:
+        st.write(
+            "Looks for stocks tracing out a **Volatility Contraction Pattern (VCP)** — a series "
+            "of pullbacks that get progressively shallower (and quieter, on volume) as a stock "
+            "coils beneath a resistance level (the **pivot**), often resolving in a breakout. "
+            "This is a heuristic approximation, not a certified pattern match — always look at "
+            "the chart before trusting a result."
+        )
+
+        ctrl1, ctrl2, ctrl3 = st.columns(3)
+        min_contractions = ctrl1.slider(
+            "Minimum contractions required", 2, 4, 2,
+            help="A classic VCP usually has 2-4 (sometimes more) progressively smaller pullbacks.",
+        )
+        breakouts_only = ctrl2.checkbox("Show breakout candidates only", value=False)
+        swing_window = ctrl3.slider(
+            "Swing sensitivity (days each side)", 3, 10, 5,
+            help="Smaller = picks up minor wiggles as contractions. Larger = only major swings count.",
+        )
+
+        with st.spinner("Scanning for VCP setups..."):
+            vcp_all = compute_vcp(st.session_state.price_data, swing_window)
+
+        if vcp_all.empty:
+            st.warning("No stocks had enough history to scan for VCP setups.")
+        else:
+            vcp_candidates = vcp_all[
+                vcp_all["is_vcp_candidate"] & (vcp_all["num_contractions"] >= min_contractions)
+            ].copy()
+            if breakouts_only:
+                vcp_candidates = vcp_candidates[vcp_candidates["is_breakout"]]
+            vcp_candidates = vcp_candidates.sort_values("vcp_score", ascending=False).reset_index(drop=True)
+            if not vcp_candidates.empty:
+                vcp_candidates.insert(0, "rank", np.arange(1, len(vcp_candidates) + 1))
+
+            st.caption(
+                f"Scanned {len(vcp_all)} stocks · {int(vcp_all['is_vcp_candidate'].sum())} showing at least "
+                f"2 shrinking contractions in an uptrend · {len(vcp_candidates)} match current filters"
+            )
+
+            if vcp_candidates.empty:
+                st.warning(
+                    "No VCP candidates match the current filters. Try lowering the minimum "
+                    "contractions, unchecking 'breakouts only', or widening the universe size."
+                )
+            else:
+                vcp_display_cols = {
+                    "rank": "Rank",
+                    "ticker": "Ticker",
+                    "last_price": "Price",
+                    "vcp_score": "VCP Score",
+                    "num_contractions": "# Contractions",
+                    "pivot_price": "Pivot",
+                    "pct_below_pivot": "% Below Pivot",
+                    "volume_dryup_ratio": "Vol Dry-up",
+                    "is_breakout": "Breakout",
+                }
+                vcp_table = vcp_candidates[list(vcp_display_cols.keys())].rename(columns=vcp_display_cols)
+                vcp_table["Breakout"] = vcp_table["Breakout"].map({True: "🚀 Yes", False: "—"})
+                vcp_table["Contraction Depths"] = vcp_candidates["contraction_depths"].apply(
+                    lambda ds: " → ".join(f"{d:.0f}%" for d in ds) if ds else "—"
+                )
+
+                st.dataframe(
+                    vcp_table.style.format(
+                        {
+                            "Price": "${:.2f}",
+                            "VCP Score": "{:.1f}",
+                            "Pivot": "${:.2f}",
+                            "% Below Pivot": "{:+.1f}%",
+                            "Vol Dry-up": "{:.2f}x",
+                        },
+                        na_rep="—",
+                    ).background_gradient(subset=["VCP Score"], cmap="Greens"),
+                    use_container_width=True,
+                    hide_index=True,
+                    height=min(700, 45 * (len(vcp_table) + 1)),
+                )
+
+                st.subheader("Inspect a candidate")
+                vcp_selected = st.selectbox(
+                    "Pick a ticker from the VCP list above", vcp_candidates["ticker"].tolist(), key="vcp_select"
+                )
+
+                if vcp_selected:
+                    row = vcp_candidates[vcp_candidates["ticker"] == vcp_selected].iloc[0]
+                    df = st.session_state.price_data[vcp_selected]
+
+                    c1, c2, c3, c4 = st.columns(4)
+                    c1.metric("VCP Score", f"{row['vcp_score']:.1f} / 100")
+                    depths_str = " → ".join(f"{d:.0f}%" for d in row["contraction_depths"])
+                    c2.metric("Contractions", f"{row['num_contractions']}", help=depths_str)
+                    c3.metric("Pivot", f"${row['pivot_price']:.2f}" if pd.notna(row["pivot_price"]) else "—")
+                    c4.metric(
+                        "% Below Pivot" if not row["is_breakout"] else "% Above Pivot",
+                        f"{abs(row['pct_below_pivot']):.1f}%" if pd.notna(row["pct_below_pivot"]) else "—",
+                    )
+
+                    fig = go.Figure()
+                    fig.add_trace(go.Scatter(x=df.index, y=df["Close"], name="Close", line=dict(color="#2E7D32")))
+                    fig.add_trace(go.Scatter(x=df.index, y=df["Close"].rolling(50).mean(), name="50-day MA",
+                                              line=dict(color="#1976D2", dash="dot")))
+                    fig.add_trace(go.Scatter(x=df.index, y=df["Close"].rolling(200).mean(), name="200-day MA",
+                                              line=dict(color="#E65100", dash="dot")))
+
+                    swing_highs = row["swing_highs"]
+                    swing_lows = row["swing_lows"]
+                    if swing_highs:
+                        fig.add_trace(go.Scatter(
+                            x=[df.index[p["pos"]] for p in swing_highs],
+                            y=[p["price"] for p in swing_highs],
+                            mode="markers", name="Swing high",
+                            marker=dict(symbol="triangle-down", size=12, color="#EF5350"),
+                        ))
+                    if swing_lows:
+                        fig.add_trace(go.Scatter(
+                            x=[df.index[p["pos"]] for p in swing_lows],
+                            y=[p["price"] for p in swing_lows],
+                            mode="markers", name="Swing low",
+                            marker=dict(symbol="triangle-up", size=12, color="#66BB6A"),
+                        ))
+                    if pd.notna(row["pivot_price"]):
+                        fig.add_hline(y=row["pivot_price"], line_dash="dash", line_color="#FFB300",
+                                      annotation_text="Pivot", annotation_position="top left")
+
+                    fig.update_layout(
+                        title=f"{vcp_selected} — detected contractions and pivot",
+                        height=420,
+                        margin=dict(l=20, r=20, t=50, b=20),
+                        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+
+        with st.expander("How VCP detection works"):
+            st.markdown(
+                """
+This scanner looks for stocks already in an uptrend (a simplified version of the "Trend
+Template": above their 50- and 200-day moving averages with a golden cross, not too far below
+their 52-week high, and well clear of their 52-week low), then finds their most recent chain of
+price pullbacks that keep getting **shallower** — the hallmark of a Volatility Contraction
+Pattern.
+
+- **Contractions**: each pullback's depth (the % drop from a swing high to the following swing
+  low). A valid chain needs at least 2, each one shallower than the last.
+- **Pivot**: the high just before the tightest, most recent pullback — the level a breakout
+  needs to clear.
+- **Vol Dry-up**: recent (10-day) average volume divided by the trailing 50-day average.
+  Below 1.0 means volume is contracting along with price, the classic VCP "quieting down" sign.
+- **Breakout**: flagged when price has closed above the pivot on volume at least 30% above its
+  50-day average.
+
+There's no single agreed-upon algorithmic definition of a VCP — this is a reasonable
+approximation, not a certified pattern match. Always check the annotated chart (swing highs are
+red markers, swing lows are green, the pivot is the dashed line) before trusting a result, and
+treat this as a starting point for further research, not a trading signal.
+                """
+            )
 else:
     st.info("Click **Fetch data / Refresh** in the sidebar to scan the market.")

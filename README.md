@@ -1,26 +1,41 @@
 # Momentum Stock Screener
 
-A local web dashboard that scans the S&P 500 and ranks stocks by a composite
-**Momentum Score (0-100)**, combining:
+A local web dashboard that scans the S&P 500 and ranks stocks two ways, in
+two tabs:
 
-1. **Price momentum (12-1 month)** — trailing 12-month return, excluding the
-   most recent month (the standard academic momentum factor).
-2. **Relative strength vs the S&P 500** — how much a stock has out/underperformed
-   SPY over 3, 6, and 12 months.
-3. **Trend + volume confirmation** — price above its 50-day and 200-day moving
-   averages, a "golden cross" (50-day MA above 200-day MA), and above-average
-   recent trading volume.
-4. **Short-term technical signals** — RSI, a bullish MACD crossover, and
-   closeness to the 52-week high.
+- **📈 Momentum Screener** — ranks stocks by a composite **Momentum Score
+  (0-100)**, combining:
 
-You control how much each category counts toward the final score with sliders
-in the sidebar.
+  1. **Price momentum (12-1 month)** — trailing 12-month return, excluding the
+     most recent month (the standard academic momentum factor).
+  2. **Relative strength vs the S&P 500** — how much a stock has out/underperformed
+     SPY over 3, 6, and 12 months.
+  3. **Trend + volume confirmation** — price above its 50-day and 200-day moving
+     averages, a "golden cross" (50-day MA above 200-day MA), and above-average
+     recent trading volume.
+  4. **Short-term technical signals** — RSI, a bullish MACD crossover, and
+     closeness to the 52-week high.
 
-**This is an educational/research tool, not financial advice.** Momentum
-strategies can reverse sharply, past performance doesn't predict future
-results, and this screener does not account for fees, taxes, slippage, or
-your personal risk tolerance. Always do your own research (or talk to a
-licensed financial advisor) before acting on anything it shows you.
+  You control how much each category counts toward the final score with
+  sliders in the sidebar.
+
+- **🔎 VCP Scanner** — looks for stocks tracing out a **Volatility
+  Contraction Pattern (VCP)**: the Mark Minervini-style setup where a stock
+  already in an uptrend forms a series of pullbacks that get progressively
+  shallower (and quieter, on volume) as it coils beneath a resistance level
+  (the "pivot"), often ahead of a breakout. There's no single agreed
+  algorithmic definition of a VCP — this is a documented heuristic
+  approximation, not a certified pattern match. See "How VCP detection
+  works" inside that tab for exactly what it checks, and always look at the
+  annotated chart (swing highs/lows and the pivot line) before trusting a
+  result.
+
+**This is an educational/research tool, not financial advice.** Momentum and
+VCP-style strategies can reverse or fail sharply, past performance doesn't
+predict future results, and neither screener accounts for fees, taxes,
+slippage, or your personal risk tolerance. Always do your own research (or
+talk to a licensed financial advisor) before acting on anything either tab
+shows you.
 
 ## What's in this folder
 
@@ -28,9 +43,11 @@ licensed financial advisor) before acting on anything it shows you.
 |---|---|
 | `app.py` | The Streamlit dashboard (what you actually run) |
 | `momentum_calc.py` | Pure math: all the momentum/technical factor calculations |
+| `vcp_calc.py` | Pure math: the VCP (Volatility Contraction Pattern) detection and scoring |
 | `data_fetch.py` | Gets the S&P 500 ticker list and downloads price history via `yfinance` |
 | `requirements.txt` | Python packages needed |
-| `test_momentum_calc.py` | Sanity checks for the math, using synthetic price data (no internet needed) |
+| `test_momentum_calc.py` | Sanity checks for the momentum math, using synthetic price data (no internet needed) |
+| `test_vcp_calc.py` | Sanity checks for VCP detection, using a hand-built synthetic contraction pattern (no internet needed) |
 | `test_app_smoke.py` | End-to-end dry run of the app's logic with fake data (no internet needed) |
 
 ## Setup (one-time)

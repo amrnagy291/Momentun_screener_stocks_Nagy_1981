@@ -41,6 +41,19 @@ class FakeSidebar:
 
 class FakeColumn:
     def metric(self, *a, **k): pass
+    def slider(self, label, *a, **k):
+        if "value" in k:
+            return k["value"]
+        return a[2] if len(a) > 2 else (a[0] if a else 0)
+    def checkbox(self, label, *a, **k):
+        return k.get("value", False)
+    def number_input(self, label, *a, **k):
+        return k.get("value", 0.0)
+    def __enter__(self): return self
+    def __exit__(self, *a): return False
+
+
+class FakeTab:
     def __enter__(self): return self
     def __exit__(self, *a): return False
 
@@ -118,6 +131,10 @@ def install_fake_streamlit():
         return [FakeColumn() for _ in range(n)]
     st.columns = _columns
 
+    def _tabs(labels, *a, **k):
+        return [FakeTab() for _ in labels]
+    st.tabs = _tabs
+
     def _cache_data(*dargs, **dkwargs):
         # support both @st.cache_data and @st.cache_data(ttl=..., show_spinner=...)
         if len(dargs) == 1 and callable(dargs[0]) and not dkwargs:
@@ -140,6 +157,7 @@ def install_fake_plotly():
     class FakeFigure:
         def __init__(self, *a, **k): self.traces = []
         def add_trace(self, *a, **k): self.traces.append(a)
+        def add_hline(self, *a, **k): pass
         def update_layout(self, *a, **k): pass
 
     class FakeScatter:
