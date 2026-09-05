@@ -97,6 +97,17 @@ def main():
     check("clean VCP setup passes the trend template", vc.passes_trend_template(vcp_df) is True)
     check("no-pattern downtrend fails the trend template", vc.passes_trend_template(flat_df) is False)
 
+    # --- calendar-aware day-counts (used for crypto's 365-day-a-year calendar) ---
+    check("clean VCP setup still passes the trend template with crypto (365-day) day-counts",
+          vc.passes_trend_template(vcp_df, days_per_year=365) is True)
+    check("no-pattern downtrend still fails the trend template with crypto (365-day) day-counts",
+          vc.passes_trend_template(flat_df, days_per_year=365) is False)
+    factors_crypto_calendar = vc.compute_vcp_factors(vcp_df, days_per_year=365)
+    check("compute_vcp_factors accepts crypto day-counts and still finds a valid candidate",
+          factors_crypto_calendar["is_vcp_candidate"] is True)
+    check("compute_vcp_factors with crypto day-counts still scores meaningfully higher than no-pattern",
+          factors_crypto_calendar["vcp_score"] > vc.compute_vcp_factors(flat_df, days_per_year=365)["vcp_score"])
+
     # --- contraction detection on the clean (not-yet-broken-out) case ---
     info = vc.detect_contractions(vcp_df, window=5, lookback_days=180)
     check("finds at least 2 contractions", info["num_contractions"] >= 2)
@@ -139,6 +150,10 @@ def main():
     ranked = vc.rank_vcp_candidates(universe.to_dict("records"))
     check("ranked output excludes FLAT", "FLAT" not in ranked["ticker"].tolist())
     check("ranked output includes CLEAN and BREAKOUT", set(["CLEAN", "BREAKOUT"]).issubset(set(ranked["ticker"])))
+
+    universe_crypto_calendar = vc.compute_universe_vcp(price_data, bench_ticker="SPY", days_per_year=365)
+    check("universe pipeline accepts crypto day-counts and still excludes the benchmark",
+          len(universe_crypto_calendar) == 3)
     print("\nRanked VCP universe:")
     print(ranked[["rank", "ticker", "vcp_score", "num_contractions", "is_breakout", "pct_below_pivot"]].to_string(index=False))
 

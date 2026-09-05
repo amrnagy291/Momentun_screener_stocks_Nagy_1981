@@ -91,6 +91,31 @@ def main():
     check("rsi_score very weak is discounted", mc.rsi_score(20) < mc.rsi_score(65))
     check("rsi_score handles None", mc.rsi_score(None) == 50.0)
 
+    # --- calendar-aware day-counts (used for crypto's 365-day-a-year calendar) ---
+    m12_1_stock_calendar = mc.momentum_12_1(strong["Close"])
+    m12_1_crypto_calendar = mc.momentum_12_1(strong["Close"], days_per_year=365, days_per_month=30)
+    check("momentum_12_1 with crypto day-counts differs from the stock default",
+          m12_1_stock_calendar != m12_1_crypto_calendar)
+
+    # A "hump" fixture where the true peak sits ~300 days before the last row:
+    # the default 252-day window misses it, but a 365-day (crypto-calendar)
+    # window should catch it, since it covers more calendar time per row when
+    # the asset trades every day instead of just weekdays.
+    hump_prices = np.concatenate([
+        np.linspace(100, 250, 100, endpoint=False),  # rises to a peak of 250 at day 99
+        np.linspace(250, 150, 300),                  # then declines for the rest of the series
+    ])
+    hump_close = pd.Series(hump_prices, index=pd.date_range("2023-01-01", periods=400, freq="B"))
+    off_high_252 = mc.pct_off_52w_high(hump_close)
+    off_high_365 = mc.pct_off_52w_high(hump_close, days_per_year=365)
+    check("pct_off_52w_high with a 365-day window catches an older, higher peak the 252-day window misses",
+          off_high_365 > off_high_252)
+    print(f"    pct_off_52w_high (hump fixture) 252-day={off_high_252:.1f}% 365-day={off_high_365:.1f}%")
+
+    factors_crypto_calendar = mc.compute_all_factors(strong, bench, days_per_year=365, days_per_month=30)
+    check("compute_all_factors accepts crypto day-counts and still returns a momentum value",
+          factors_crypto_calendar["momentum_12_1"] is not None)
+
     # --- full pipeline across a small universe ---
     universe = {
         "STRONG": strong,

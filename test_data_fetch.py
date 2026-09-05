@@ -61,6 +61,18 @@ def main():
     check("no duplicates", len(tickers) == len(set(tickers)))
     check("result is sorted", tickers == sorted(tickers))
 
+    # --- crypto ticker list ---
+    crypto_tickers = df.get_crypto_tickers()
+    print(f"    crypto tickers ({len(crypto_tickers)}): {crypto_tickers}")
+    check("crypto ticker list is non-empty", len(crypto_tickers) > 0)
+    check("every crypto ticker uses the yfinance '-USD' pair format",
+          all(t.endswith("-USD") for t in crypto_tickers))
+    check("BTC-USD (the benchmark) is not ranked among the crypto tickers themselves",
+          "BTC-USD" not in crypto_tickers)
+    check("crypto ticker list excludes major USD-pegged stablecoins",
+          not ({"USDT-USD", "USDC-USD", "DAI-USD"} & set(crypto_tickers)))
+    check("no duplicate crypto tickers", len(crypto_tickers) == len(set(crypto_tickers)))
+
     print("\nAll checks passed.")
 
 
