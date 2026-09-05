@@ -66,10 +66,13 @@ licensed financial advisor) before acting on anything any tab shows you.
 | `vcp_calc.py` | Pure math: the VCP (Volatility Contraction Pattern) detection and scoring |
 | `unusual_activity_calc.py` | Pure math: single-day price-change % and relative-volume detection |
 | `data_fetch.py` | Gets the ticker list (S&P 500 or all US stocks) and downloads price history via `yfinance` |
+| `cache_store.py` | Saves downloaded price history to disk so reopening the app doesn't re-download it |
 | `requirements.txt` | Python packages needed |
 | `test_momentum_calc.py` | Sanity checks for the momentum math, using synthetic price data (no internet needed) |
 | `test_vcp_calc.py` | Sanity checks for VCP detection, using a hand-built synthetic contraction pattern (no internet needed) |
 | `test_unusual_activity_calc.py` | Sanity checks for the unusual-activity math, using synthetic price/volume spikes (no internet needed) |
+| `test_data_fetch.py` | Sanity checks for ticker-list parsing (no internet needed) |
+| `test_cache_store.py` | Sanity checks for the disk cache (no internet needed) |
 | `test_app_smoke.py` | End-to-end dry run of the app's logic with fake data (no internet needed) |
 
 ## Setup (one-time)
@@ -98,6 +101,18 @@ via Yahoo Finance. With the default S&P 500 / 150-stock universe this usually
 takes 30-90 seconds; the full 500 takes a few minutes. Results are cached
 until your next refresh so you don't re-download every time you tweak a slider.
 
+**Reopening the app is fast.** Downloaded price data is also saved to disk
+(in a `.cache/` folder next to `app.py`), so closing and reopening the app —
+or just restarting it — reuses that data instantly instead of re-downloading
+everything. A "📅 last updated" caption shows how old the data is; click
+**Refresh** (or, for crypto, **Fetch Crypto Data**) any time you want the
+latest prices. The cache is keyed to your exact universe choice, so switching
+between S&P 500 / All US Stocks / different universe sizes downloads fresh
+data for each one the first time, then reuses it after that. The `.cache/`
+folder is machine-specific — don't upload it to GitHub (a `.gitignore` is
+included for this, though it only matters if you use `git` directly rather
+than GitHub's drag-and-drop upload page).
+
 **Universe source:** choose **S&P 500** (fast, ~500 stocks, good for everyday
 use) or **All US Stocks** in the sidebar. The latter pulls essentially every
 NYSE + Nasdaq common stock (several thousand tickers, via NASDAQ Trader's
@@ -117,7 +132,11 @@ Start with a smaller number on this slider even when using "All US Stocks."
 3. Use the **filters** (minimum price, uptrend-only) to cut out penny stocks
    or names that are technically weak despite a decent score.
 4. The **ranked table** shows the top stocks by Momentum Score, with a
-   breakdown by category so you can see *why* a stock scored well.
+   breakdown by category so you can see *why* a stock scored well. Use the
+   **🔎 Search ticker** box above any table to jump straight to a specific
+   ticker (this searches everything that passed your filters, not just the
+   visible top N), and the **⬇️ Download as CSV/Excel** buttons below any
+   table to save a snapshot of the current results.
 5. Pick any ticker from the dropdown to see its price chart with 50/200-day
    moving averages and its individual metrics.
 6. Switch to the **VCP Scanner** or **Unusual Activity** tabs for the other

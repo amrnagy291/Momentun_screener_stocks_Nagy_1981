@@ -9,14 +9,24 @@ that plain syntax-checking can't.
 Run with: python3 test_app_smoke.py
 """
 
+import shutil
 import sys
+import tempfile
 import types
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 
 
 class StopExecution(Exception):
     pass
+
+
+def check(name, cond):
+    status = "PASS" if cond else "FAIL"
+    print(f"[{status}] {name}")
+    assert cond, name
 
 
 # --- stub streamlit -------------------------------------------------------
@@ -55,6 +65,8 @@ class FakeColumn:
         return options[0] if len(options) else None
     def button(self, *a, **k):
         return True  # simulate: user clicked (used for the crypto tab's own fetch button)
+    def download_button(self, *a, **k):
+        return False
     def __enter__(self): return self
     def __exit__(self, *a): return False
 
@@ -112,6 +124,8 @@ def install_fake_streamlit():
     st.plotly_chart = lambda *a, **k: None
     st.dataframe = lambda *a, **k: None
     st.metric = lambda *a, **k: None
+    st.text_input = lambda label, *a, **k: k.get("value", "")
+    st.download_button = lambda *a, **k: False
 
     def _error(msg, *a, **k):
         print(f"  [st.error called]: {msg}")
@@ -229,7 +243,7 @@ def make_fake_universe(n=12, n_crypto=6, days=400, seed=42):
 
 
 def main():
-    install_fake_streamlit()
+    st = install_fake_streamlit()
     install_fake_plotly()
 
     import data_fetch
@@ -240,13 +254,26 @@ def main():
     data_fetch.get_sp500_tickers = lambda: fake_tickers
     data_fetch.get_crypto_tickers = lambda: fake_crypto_tickers
 
+    call_counts = {"stock": 0, "crypto": 0}
+
     def _fake_download(tickers, benchmark_ticker=data_fetch.BENCHMARK_TICKER, **kwargs):
         # Mirrors the real download_price_history signature: the benchmark
         # defaults to SPY (stocks) but the crypto tab passes BTC-USD instead --
         # respecting the kwarg (rather than always appending "SPY") is what
         # lets the crypto tab's benchmark check succeed in this smoke test.
+        if benchmark_ticker == data_fetch.CRYPTO_BENCHMARK_TICKER:
+            call_counts["crypto"] += 1
+        else:
+            call_counts["stock"] += 1
         return {t: fake_universe[t] for t in list(tickers) + [benchmark_ticker] if t in fake_universe}
     data_fetch.download_price_history = _fake_download
+
+    # Redirect the disk cache to a scratch directory for this test run, so it
+    # never touches (or is affected by) a real .cache/ folder from an actual
+    # run of the app.
+    import cache_store
+    cache_scratch_dir = Path(tempfile.mkdtemp())
+    cache_store.CACHE_DIR = cache_scratch_dir
 
     # app.py checks `if refresh or st.session_state.price_data is None:` on first run,
     # and our fake sidebar.button() returns False for refresh, so first run relies on
@@ -254,15 +281,37 @@ def main():
     # The crypto tab's own fetch button (FakeColumn.button) returns True instead, so its
     # fetch-and-render path is exercised too, on every run.
 
-    print("Running app.py end-to-end with synthetic data (no real network/streamlit)...")
     try:
         with open("app.py") as f:
             code = f.read()
-        exec(compile(code, "app.py", "exec"), {"__name__": "__main__"})
-    except StopExecution:
-        print("  (script called st.stop() -- treated as a controlled stop, not a crash)")
 
-    print("\n[PASS] app.py ran without raising an unhandled exception.")
+        print("Running app.py end-to-end with synthetic data (no real network/streamlit)...")
+        try:
+            exec(compile(code, "app.py", "exec"), {"__name__": "__main__"})
+        except StopExecution:
+            print("  (script called st.stop() -- treated as a controlled stop, not a crash)")
+        print("[PASS] app.py ran without raising an unhandled exception.")
+        check("first run actually downloaded stock data (no cache existed yet)", call_counts["stock"] > 0)
+
+        # Second pass: a fresh session_state (simulating a new browser session /
+        # app restart) but the SAME on-disk cache dir from the first run's save --
+        # the stock tabs should load straight from disk instead of re-downloading.
+        # (The crypto tab's fetch button is faked to always return True, so crypto
+        # keeps "fetching" on every pass regardless -- only the stock count matters here.)
+        stock_calls_before = call_counts["stock"]
+        st.session_state = FakeSessionState()
+        print("\nRunning app.py again with a fresh session (same on-disk cache)...")
+        try:
+            exec(compile(code, "app.py", "exec"), {"__name__": "__main__"})
+        except StopExecution:
+            print("  (script called st.stop() -- treated as a controlled stop, not a crash)")
+        check("second run reused the on-disk cache instead of re-downloading stock data",
+              call_counts["stock"] == stock_calls_before)
+        print("[PASS] disk cache prevented a redundant stock download on the second run.")
+    finally:
+        shutil.rmtree(cache_scratch_dir, ignore_errors=True)
+
+    print("\nAll checks passed.")
 
 
 if __name__ == "__main__":

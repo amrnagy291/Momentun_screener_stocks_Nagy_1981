@@ -6,3 +6,4 @@ plotly>=5.18
 requests>=2.31
 lxml>=5.0
 matplotlib>=3.7
+openpyxl>=3.1

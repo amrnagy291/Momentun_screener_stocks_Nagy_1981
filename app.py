@@ -23,11 +23,14 @@ Always do your own research before trading on this or any screener's output.
 
 from __future__ import annotations
 
+import io
+
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
+import cache_store
 import data_fetch
 import momentum_calc as mc
 import vcp_calc as vc
@@ -119,6 +122,28 @@ def compute_crypto_unusual(price_data: dict[str, pd.DataFrame]) -> pd.DataFrame:
 # copies of the same logic).
 # ---------------------------------------------------------------------------
 
+def render_export_buttons(table: pd.DataFrame, filename_stub: str, key_prefix: str):
+    """CSV always works (built into pandas); Excel needs the optional
+    `openpyxl` package -- if it isn't installed, that button is swapped for
+    a one-line hint instead of crashing the app."""
+    exp1, exp2 = st.columns(2)
+    csv_bytes = table.to_csv(index=False).encode("utf-8")
+    exp1.download_button(
+        "⬇️ Download as CSV", data=csv_bytes, file_name=f"{filename_stub}.csv",
+        mime="text/csv", key=f"{key_prefix}_{filename_stub}_csv", use_container_width=True,
+    )
+    try:
+        excel_buffer = io.BytesIO()
+        table.to_excel(excel_buffer, index=False, engine="openpyxl")
+        exp2.download_button(
+            "⬇️ Download as Excel", data=excel_buffer.getvalue(), file_name=f"{filename_stub}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key=f"{key_prefix}_{filename_stub}_xlsx", use_container_width=True,
+        )
+    except ImportError:
+        exp2.caption("Install `openpyxl` (see requirements.txt) for Excel export.")
+
+
 def render_momentum_results(*, factors_df, price_data, weights, total_downloaded,
                              benchmark_label, key_prefix, min_price, require_uptrend, top_n,
                              asset_noun="stocks", asset_noun_singular="stock"):
@@ -127,15 +152,22 @@ def render_momentum_results(*, factors_df, price_data, weights, total_downloaded
     filtered = ranked[ranked["last_price"] >= min_price]
     if require_uptrend:
         filtered = filtered[filtered["above_200ma"]]
-    filtered = filtered.head(top_n)
 
-    st.caption(
-        f"Scanned {len(factors_df)} {asset_noun} · {total_downloaded} "
-        f"total tickers downloaded · showing top {len(filtered)} after filters"
+    search_query = st.text_input(
+        "🔎 Search ticker", key=f"{key_prefix}_momentum_search",
+        placeholder="e.g. AAPL -- searches all filtered results, not just the top N",
     )
+    if search_query:
+        filtered = filtered[filtered["ticker"].str.contains(search_query.strip(), case=False, na=False)]
+        result_note = f"showing {len(filtered)} match(es) for '{search_query}'"
+    else:
+        filtered = filtered.head(top_n)
+        result_note = f"showing top {len(filtered)} after filters"
+
+    st.caption(f"Scanned {len(factors_df)} {asset_noun} · {total_downloaded} total tickers downloaded · {result_note}")
 
     if filtered.empty:
-        st.warning("Nothing matches the current filters. Try lowering the minimum price or unchecking the uptrend filter.")
+        st.warning("Nothing matches the current filters/search. Try lowering the minimum price, unchecking the uptrend filter, or clearing the search box.")
         return
 
     display_cols = {
@@ -174,6 +206,7 @@ def render_momentum_results(*, factors_df, price_data, weights, total_downloaded
         hide_index=True,
         height=min(700, 45 * (len(table) + 1)),
     )
+    render_export_buttons(table, f"{key_prefix}_momentum_results", key_prefix)
 
     st.subheader(f"Inspect a {asset_noun_singular}")
     selected = st.selectbox(
@@ -266,6 +299,16 @@ def render_vcp_results(*, price_data, bench_ticker, days_per_year, key_prefix,
     ].copy()
     if breakouts_only:
         vcp_candidates = vcp_candidates[vcp_candidates["is_breakout"]]
+
+    vcp_search_query = st.text_input(
+        "🔎 Search ticker", key=f"{key_prefix}_vcp_search",
+        placeholder="e.g. AAPL -- searches all current candidates",
+    )
+    if vcp_search_query:
+        vcp_candidates = vcp_candidates[
+            vcp_candidates["ticker"].str.contains(vcp_search_query.strip(), case=False, na=False)
+        ]
+
     vcp_candidates = vcp_candidates.sort_values("vcp_score", ascending=False).reset_index(drop=True)
     if not vcp_candidates.empty:
         vcp_candidates.insert(0, "rank", np.arange(1, len(vcp_candidates) + 1))
@@ -273,12 +316,14 @@ def render_vcp_results(*, price_data, bench_ticker, days_per_year, key_prefix,
     st.caption(
         f"Scanned {len(vcp_all)} {asset_noun} · {int(vcp_all['is_vcp_candidate'].sum())} showing at least "
         f"2 shrinking contractions in an uptrend · {len(vcp_candidates)} match current filters"
+        + (f" and search '{vcp_search_query}'" if vcp_search_query else "")
     )
 
     if vcp_candidates.empty:
         st.warning(
-            "No VCP candidates match the current filters. Try lowering the minimum "
-            "contractions, unchecking 'breakouts only', or widening the universe size."
+            "No VCP candidates match the current filters/search. Try lowering the minimum "
+            "contractions, unchecking 'breakouts only', widening the universe size, or "
+            "clearing the search box."
         )
     else:
         vcp_display_cols = {
@@ -313,6 +358,7 @@ def render_vcp_results(*, price_data, bench_ticker, days_per_year, key_prefix,
             hide_index=True,
             height=min(700, 45 * (len(vcp_table) + 1)),
         )
+        render_export_buttons(vcp_table, f"{key_prefix}_vcp_results", key_prefix)
 
         st.subheader(f"Inspect a candidate")
         vcp_selected = st.selectbox(
@@ -435,16 +481,28 @@ def render_unusual_results(*, price_data, bench_ticker, key_prefix, asset_noun="
     else:
         candidates = candidates[candidates["price_change_pct"].abs() >= min_price_change]
 
+    unusual_search_query = st.text_input(
+        "🔎 Search ticker", key=f"{key_prefix}_unusual_search",
+        placeholder="e.g. AAPL -- searches all current candidates",
+    )
+    if unusual_search_query:
+        candidates = candidates[
+            candidates["ticker"].str.contains(unusual_search_query.strip(), case=False, na=False)
+        ]
+
     candidates = candidates.sort_values("unusual_score", ascending=False).reset_index(drop=True)
     if not candidates.empty:
         candidates.insert(0, "rank", np.arange(1, len(candidates) + 1))
 
-    st.caption(f"Scanned {len(unusual_all)} {asset_noun} · {len(candidates)} match current filters")
+    st.caption(
+        f"Scanned {len(unusual_all)} {asset_noun} · {len(candidates)} match current filters"
+        + (f" and search '{unusual_search_query}'" if unusual_search_query else "")
+    )
 
     if candidates.empty:
         st.warning(
-            "No assets match the current filters. Try lowering the minimum price change "
-            "or relative volume, or widening the universe size."
+            "No assets match the current filters/search. Try lowering the minimum price change, "
+            "the relative volume, widening the universe size, or clearing the search box."
         )
         return
 
@@ -474,6 +532,7 @@ def render_unusual_results(*, price_data, bench_ticker, key_prefix, asset_noun="
         hide_index=True,
         height=min(700, 45 * (len(unusual_table) + 1)),
     )
+    render_export_buttons(unusual_table, f"{key_prefix}_unusual_results", key_prefix)
 
     st.subheader("Inspect a mover")
     unusual_selected = st.selectbox(
@@ -580,8 +639,9 @@ top_n = st.sidebar.slider("Show top N stocks", 10, 100, 25)
 
 refresh = st.sidebar.button("🔄 Fetch data / Refresh", type="primary", use_container_width=True)
 st.sidebar.caption(
-    "Data is cached for 1 hour after each fetch. Prices are end-of-day via Yahoo Finance "
-    "(yfinance) and may be delayed — this is not a live/real-time feed."
+    "Downloaded data is saved to disk, so reopening the app reuses it instantly instead of "
+    "re-downloading — click Refresh any time you want the latest prices. Prices are end-of-day "
+    "via Yahoo Finance (yfinance) and may be delayed — this is not a live/real-time feed."
 )
 
 # ---------------------------------------------------------------------------
@@ -601,12 +661,35 @@ if "price_data" not in st.session_state:
     st.session_state.price_data = None
 if "factors_df" not in st.session_state:
     st.session_state.factors_df = None
+if "price_data_timestamp" not in st.session_state:
+    st.session_state.price_data_timestamp = None
 if "crypto_price_data" not in st.session_state:
     st.session_state.crypto_price_data = None
 if "crypto_factors_df" not in st.session_state:
     st.session_state.crypto_factors_df = None
+if "crypto_price_data_timestamp" not in st.session_state:
+    st.session_state.crypto_price_data_timestamp = None
 
-if refresh or st.session_state.price_data is None:
+# A disk cache key unique to this exact universe choice -- switching S&P 500
+# vs All US Stocks, or the size slider, targets a different cache entry
+# rather than serving stale data for the wrong universe.
+stock_cache_key = f"stocks|{universe_source}|{universe_size}"
+
+do_fetch = False
+if refresh:
+    do_fetch = True  # an explicit refresh always re-downloads, ignoring any disk cache
+elif st.session_state.price_data is None:
+    # First load this session -- check the on-disk cache (saved by a previous
+    # run of the app) before hitting the network at all.
+    cached_price_data, cached_ts = cache_store.load(stock_cache_key)
+    if cached_price_data:
+        st.session_state.price_data = cached_price_data
+        st.session_state.price_data_timestamp = cached_ts
+        st.session_state.factors_df = None
+    else:
+        do_fetch = True
+
+if do_fetch:
     fetch_label = "Fetching S&P 500 ticker list..." if universe_source == "S&P 500" else "Fetching full US market ticker list..."
     with st.spinner(fetch_label):
         all_tickers = load_tickers() if universe_source == "S&P 500" else load_all_us_tickers()
@@ -642,6 +725,7 @@ if refresh or st.session_state.price_data is None:
     else:
         st.session_state.price_data = price_data
         st.session_state.factors_df = None  # force recompute below
+        st.session_state.price_data_timestamp = cache_store.save(stock_cache_key, price_data)
 
 if st.session_state.price_data:
     if st.session_state.factors_df is None:
@@ -649,6 +733,10 @@ if st.session_state.price_data:
             st.session_state.factors_df = compute_factors(st.session_state.price_data)
     factors_df = st.session_state.factors_df
     total_downloaded = len(st.session_state.price_data)
+    st.caption(
+        f"📅 Stock data last updated: {cache_store.format_age(cache_store.age_seconds(st.session_state.price_data_timestamp))} "
+        "— click **🔄 Fetch data / Refresh** in the sidebar for the latest prices."
+    )
 else:
     factors_df = None
     total_downloaded = 0
@@ -741,6 +829,18 @@ with tab_crypto:
         "🔄 Fetch Crypto Data", type="primary", use_container_width=True, key="crypto_refresh"
     )
 
+    crypto_cache_key = f"crypto|{crypto_universe_size}"
+
+    if not crypto_refresh and st.session_state.crypto_price_data is None:
+        # First time opening this tab this session -- if a previous run of the
+        # app already scanned crypto, load it from disk instead of requiring
+        # another click before showing anything.
+        cached_crypto_data, cached_crypto_ts = cache_store.load(crypto_cache_key)
+        if cached_crypto_data:
+            st.session_state.crypto_price_data = cached_crypto_data
+            st.session_state.crypto_price_data_timestamp = cached_crypto_ts
+            st.session_state.crypto_factors_df = None
+
     if crypto_refresh:
         with st.spinner("Fetching crypto ticker list..."):
             crypto_tickers_all = load_crypto_tickers()
@@ -779,15 +879,24 @@ with tab_crypto:
         else:
             st.session_state.crypto_price_data = crypto_price_data
             st.session_state.crypto_factors_df = None  # force recompute below
+            st.session_state.crypto_price_data_timestamp = cache_store.save(crypto_cache_key, crypto_price_data)
 
     if not st.session_state.crypto_price_data:
-        st.info("Click **🔄 Fetch Crypto Data** above to scan the crypto market.")
+        st.info(
+            "Click **🔄 Fetch Crypto Data** above to scan the crypto market "
+            "(or it'll load automatically from your last scan, if you've run one before)."
+        )
     else:
         if st.session_state.crypto_factors_df is None:
             with st.spinner("Computing crypto momentum factors..."):
                 st.session_state.crypto_factors_df = compute_crypto_factors(st.session_state.crypto_price_data)
         crypto_factors_df = st.session_state.crypto_factors_df
         crypto_total_downloaded = len(st.session_state.crypto_price_data)
+        st.caption(
+            f"📅 Crypto data last updated: "
+            f"{cache_store.format_age(cache_store.age_seconds(st.session_state.crypto_price_data_timestamp))} "
+            "— click **🔄 Fetch Crypto Data** above for the latest prices."
+        )
 
         crypto_sub_momentum, crypto_sub_vcp, crypto_sub_unusual = st.tabs(
             ["📈 Momentum", "🔎 VCP", "⚡ Unusual Activity"]

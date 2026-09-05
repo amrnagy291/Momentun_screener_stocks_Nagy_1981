@@ -1,0 +1,10 @@
+# Local disk cache of downloaded price history -- machine-specific, and can
+# be quite large, so it shouldn't be committed to GitHub.
+.cache/
+
+# Python virtual environment, if you created one per the README.
+venv/
+
+# Python bytecode cache.
+__pycache__/
+*.pyc
