@@ -42,14 +42,19 @@ def pct_return(close: pd.Series, lookback_days: int) -> float | None:
 # Factor 1: Price momentum, 12 months minus most recent 1 month ("12-1")
 # ---------------------------------------------------------------------------
 
-def momentum_12_1(close: pd.Series) -> float | None:
+def momentum_12_1(close: pd.Series, days_per_year: int = TRADING_DAYS_PER_YEAR,
+                   days_per_month: int = TRADING_DAYS_PER_MONTH) -> float | None:
     """
     Classic academic momentum factor: total return from 12 months ago to
     1 month ago, deliberately excluding the most recent month to avoid
     short-term mean-reversion noise.
+
+    days_per_year/days_per_month default to the equity trading-day calendar
+    (252/21). Pass e.g. 365/30 for an asset that trades every calendar day
+    (crypto) so "12 months" and "1 month" still mean actual calendar time.
     """
-    price_12m_ago = _price_n_days_ago(close, TRADING_DAYS_PER_YEAR)
-    price_1m_ago = _price_n_days_ago(close, TRADING_DAYS_PER_MONTH)
+    price_12m_ago = _price_n_days_ago(close, days_per_year)
+    price_1m_ago = _price_n_days_ago(close, days_per_month)
     if price_12m_ago is None or price_1m_ago is None or price_12m_ago == 0:
         return None
     return (price_1m_ago / price_12m_ago) - 1.0
@@ -172,12 +177,16 @@ def macd(close: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9) -> d
     }
 
 
-def pct_off_52w_high(close: pd.Series) -> float | None:
+def pct_off_52w_high(close: pd.Series, days_per_year: int = TRADING_DAYS_PER_YEAR) -> float | None:
     """
     How far (in %) the current price is below its trailing 52-week high.
     0 = at the high. Momentum stocks tend to trade close to their highs.
+
+    days_per_year defaults to the equity trading-day calendar (252); pass
+    365 for an asset that trades every calendar day (crypto) so this is a
+    genuine trailing 52 weeks rather than ~8-9 months of data.
     """
-    window = close.iloc[-TRADING_DAYS_PER_YEAR:]
+    window = close.iloc[-days_per_year:]
     if window.empty:
         return None
     high = float(window.max())
@@ -208,12 +217,18 @@ def rsi_score(value: float | None) -> float:
 # Per-stock factor bundle
 # ---------------------------------------------------------------------------
 
-def compute_all_factors(df: pd.DataFrame, bench_close: pd.Series) -> dict:
+def compute_all_factors(df: pd.DataFrame, bench_close: pd.Series,
+                         days_per_year: int = TRADING_DAYS_PER_YEAR,
+                         days_per_month: int = TRADING_DAYS_PER_MONTH) -> dict:
     """
     df: OHLCV DataFrame for one stock, indexed by date ascending, with
         'Close' and 'Volume' columns.
     bench_close: Close price series for the benchmark (e.g. SPY), same
         date index universe.
+    days_per_year/days_per_month: default to the equity trading-day calendar
+        (252/21). Pass 365/30 for an asset that trades every calendar day
+        (crypto) so "12-1 month" and "52-week high" stay calendar-accurate
+        instead of covering a much shorter span than intended.
 
     Returns a flat dict of raw factor values (NaN-safe: missing values are None).
     Cross-sectional ranking/weighting into a single composite score happens
@@ -228,17 +243,17 @@ def compute_all_factors(df: pd.DataFrame, bench_close: pd.Series) -> dict:
 
     return {
         "last_price": float(close.iloc[-1]),
-        "momentum_12_1": momentum_12_1(close),
-        "rs_3m": relative_strength(close, bench_close, 3 * TRADING_DAYS_PER_MONTH),
-        "rs_6m": relative_strength(close, bench_close, 6 * TRADING_DAYS_PER_MONTH),
-        "rs_12m": relative_strength(close, bench_close, 12 * TRADING_DAYS_PER_MONTH),
+        "momentum_12_1": momentum_12_1(close, days_per_year, days_per_month),
+        "rs_3m": relative_strength(close, bench_close, 3 * days_per_month),
+        "rs_6m": relative_strength(close, bench_close, 6 * days_per_month),
+        "rs_12m": relative_strength(close, bench_close, 12 * days_per_month),
         "above_50ma": trend["above_50ma"],
         "above_200ma": trend["above_200ma"],
         "golden_cross": trend["golden_cross"],
         "volume_ratio": trend["volume_ratio"],
         "rsi": rsi(close),
         "macd_bullish_crossover": macd_vals["bullish_crossover"],
-        "pct_off_52w_high": pct_off_52w_high(close),
+        "pct_off_52w_high": pct_off_52w_high(close, days_per_year),
     }
 
 

@@ -1,7 +1,8 @@
 # Momentum Stock Screener
 
-A local web dashboard that scans the S&P 500 and ranks stocks three ways, in
-three tabs:
+A local web dashboard that scans the S&P 500 (or the full US stock market)
+and ranks stocks three ways, in three tabs — plus a fourth tab that runs the
+same three screens on a curated list of major cryptocurrencies:
 
 - **📈 Momentum Screener** — ranks stocks by a composite **Momentum Score
   (0-100)**, combining:
@@ -38,12 +39,23 @@ three tabs:
   news or just noise — this tab surfaces candidates for you to research, it
   doesn't tell you why a stock moved.
 
+- **🪙 Crypto Screener** — the same three screens above (Momentum, VCP, and
+  Unusual Activity), applied to a hand-curated list of ~55+ major
+  cryptocurrencies instead of stocks. Uses **Bitcoin (BTC-USD)** as the
+  relative-strength benchmark instead of the S&P 500 (the same way SPY isn't
+  ranked among S&P 500 stocks, BTC-USD isn't ranked among the coins here),
+  and a **365-day-a-year calendar** for all the 12-month/52-week lookback
+  windows, since crypto trades every calendar day, not just weekdays like
+  stocks do. This tab has its own universe-size slider and its own **"🔄
+  Fetch Crypto Data"** button — it doesn't download anything until you click
+  it, so visiting the app doesn't slow down if you never open this tab.
+
 **This is an educational/research tool, not financial advice.** Momentum,
 VCP, and volume/price-spike strategies can all reverse or fail sharply, past
 performance doesn't predict future results, and none of these screeners
-account for fees, taxes, slippage, or your personal risk tolerance. Always do
-your own research (or talk to a licensed financial advisor) before acting on
-anything any tab shows you.
+account for fees, taxes, slippage, or your personal risk tolerance. Crypto in
+particular is especially volatile. Always do your own research (or talk to a
+licensed financial advisor) before acting on anything any tab shows you.
 
 ## What's in this folder
 
@@ -110,6 +122,11 @@ Start with a smaller number on this slider even when using "All US Stocks."
    moving averages and its individual metrics.
 6. Switch to the **VCP Scanner** or **Unusual Activity** tabs for the other
    two screens — see their descriptions above.
+7. Switch to the **Crypto Screener** tab, pick how many coins to scan, and
+   click **"🔄 Fetch Crypto Data"** to run the same three screens on crypto —
+   they appear as sub-tabs inside that tab. The sidebar's factor-weight
+   sliders apply to the crypto Momentum screen too; the universe-size and
+   fetch controls are separate from the stock ones above.
 
 ## Before you rely on this for real trading
 
@@ -133,12 +150,22 @@ Start with a smaller number on this slider even when using "All US Stocks."
   ETFs, test/placeholder issues, and obvious SPAC warrants/units/rights (by
   name, not by symbol pattern), and it doesn't cover OTC/pink-sheet stocks —
   just NYSE and Nasdaq-listed common stock.
+- **The crypto ticker list is hand-maintained, not a live feed.** Unlike the
+  S&P 500 / All US Stocks lists, there's no single free, reliable "top coins"
+  source that maps cleanly to yfinance tickers, so `CRYPTO_TICKERS` in
+  `data_fetch.py` is a static list that will drift out of date over time —
+  new coins won't appear until someone adds them, and delisted ones just
+  fail to download and get skipped harmlessly. Edit that list directly to
+  add or remove coins (anything yfinance recognizes as a `TICKER-USD` pair
+  works). Major USD-pegged stablecoins are intentionally excluded, since
+  their price barely moves and "momentum" doesn't mean anything for them.
 
 ## Customizing further
 
 - **Different universe:** Swap `data_fetch.get_sp500_tickers()` for your own
   ticker list (e.g. Nasdaq-100, a sector, or a personal watchlist) — it just
-  needs to return a list of ticker strings.
+  needs to return a list of ticker strings. For crypto, edit the
+  `CRYPTO_TICKERS` list directly in `data_fetch.py`.
 - **Different weighting logic:** All the scoring math lives in
   `momentum_calc.py`, in `rank_universe()` — the rest of the app doesn't care
   how the score is built, only that you get back a `momentum_score` column.

@@ -53,6 +53,8 @@ class FakeColumn:
         return k.get("value", 0.0)
     def selectbox(self, label, options, *a, **k):
         return options[0] if len(options) else None
+    def button(self, *a, **k):
+        return True  # simulate: user clicked (used for the crypto tab's own fetch button)
     def __enter__(self): return self
     def __exit__(self, *a): return False
 
@@ -131,7 +133,10 @@ def install_fake_streamlit():
         return FakeExpander()
     st.expander = _expander
 
-    def _columns(n, *a, **k):
+    def _columns(spec, *a, **k):
+        # streamlit accepts either an int (equal-width columns) or a list of
+        # relative widths (e.g. st.columns([3, 1])) -- handle both.
+        n = spec if isinstance(spec, int) else len(spec)
         return [FakeColumn() for _ in range(n)]
     st.columns = _columns
 
@@ -181,22 +186,26 @@ def install_fake_plotly():
     sys.modules["plotly.graph_objects"] = go
 
 
-def make_fake_universe(n=12, days=400, seed=42):
+def make_fake_universe(n=12, n_crypto=6, days=400, seed=42):
     rng = np.random.default_rng(seed)
     idx = pd.date_range("2023-01-01", periods=days, freq="B")
     universe = {}
-    for i in range(n):
+
+    def _make_series(start_price):
         drift = rng.uniform(-0.001, 0.0018)
         vol = rng.uniform(0.01, 0.025)
         rets = rng.normal(drift, vol, days)
-        close = 50 * np.cumprod(1 + rets)
+        close = start_price * np.cumprod(1 + rets)
         volume = rng.integers(500_000, 5_000_000, days).astype(float)
-        df = pd.DataFrame(
+        return pd.DataFrame(
             {"Open": close, "High": close * 1.01, "Low": close * 0.99, "Close": close, "Volume": volume},
             index=idx,
         )
-        universe[f"TICK{i}"] = df
-    # benchmark
+
+    for i in range(n):
+        universe[f"TICK{i}"] = _make_series(50)
+
+    # stock benchmark
     bench_rets = rng.normal(0.0004, 0.01, days)
     bench_close = 400 * np.cumprod(1 + bench_rets)
     universe["SPY"] = pd.DataFrame(
@@ -204,6 +213,18 @@ def make_fake_universe(n=12, days=400, seed=42):
          "Close": bench_close, "Volume": rng.integers(1e7, 2e7, days).astype(float)},
         index=idx,
     )
+
+    # crypto universe + its own benchmark (BTC-USD), same shape, different tickers
+    for i in range(n_crypto):
+        universe[f"CTICK{i}-USD"] = _make_series(30)
+    btc_rets = rng.normal(0.0006, 0.02, days)
+    btc_close = 30_000 * np.cumprod(1 + btc_rets)
+    universe["BTC-USD"] = pd.DataFrame(
+        {"Open": btc_close, "High": btc_close * 1.01, "Low": btc_close * 0.99,
+         "Close": btc_close, "Volume": rng.integers(1e7, 2e7, days).astype(float)},
+        index=idx,
+    )
+
     return universe
 
 
@@ -213,16 +234,25 @@ def main():
 
     import data_fetch
     fake_universe = make_fake_universe()
-    fake_tickers = [t for t in fake_universe if t != "SPY"]
+    fake_tickers = [t for t in fake_universe if t.startswith("TICK")]
+    fake_crypto_tickers = [t for t in fake_universe if t.startswith("CTICK")]
 
     data_fetch.get_sp500_tickers = lambda: fake_tickers
-    data_fetch.download_price_history = lambda tickers, **kwargs: {
-        t: fake_universe[t] for t in list(tickers) + ["SPY"] if t in fake_universe
-    }
+    data_fetch.get_crypto_tickers = lambda: fake_crypto_tickers
+
+    def _fake_download(tickers, benchmark_ticker=data_fetch.BENCHMARK_TICKER, **kwargs):
+        # Mirrors the real download_price_history signature: the benchmark
+        # defaults to SPY (stocks) but the crypto tab passes BTC-USD instead --
+        # respecting the kwarg (rather than always appending "SPY") is what
+        # lets the crypto tab's benchmark check succeed in this smoke test.
+        return {t: fake_universe[t] for t in list(tickers) + [benchmark_ticker] if t in fake_universe}
+    data_fetch.download_price_history = _fake_download
 
     # app.py checks `if refresh or st.session_state.price_data is None:` on first run,
     # and our fake sidebar.button() returns False for refresh, so first run relies on
     # session_state.price_data being None initially -- that's the default path we want to test.
+    # The crypto tab's own fetch button (FakeColumn.button) returns True instead, so its
+    # fetch-and-render path is exercised too, on every run.
 
     print("Running app.py end-to-end with synthetic data (no real network/streamlit)...")
     try:

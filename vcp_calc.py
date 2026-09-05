@@ -205,9 +205,12 @@ def detect_contractions(df: pd.DataFrame, window: int = 5, lookback_days: int = 
 # Trend template (simplified Minervini "Stage 2 uptrend" gate)
 # ---------------------------------------------------------------------------
 
-def pct_above_52w_low(close: pd.Series) -> float | None:
-    """How far (in %) the current price sits above its trailing 52-week low."""
-    window = close.iloc[-TRADING_DAYS_PER_YEAR:]
+def pct_above_52w_low(close: pd.Series, days_per_year: int = TRADING_DAYS_PER_YEAR) -> float | None:
+    """How far (in %) the current price sits above its trailing 52-week low.
+
+    days_per_year defaults to the equity trading-day calendar (252); pass
+    365 for an asset that trades every calendar day (crypto)."""
+    window = close.iloc[-days_per_year:]
     if window.empty:
         return None
     low = float(window.min())
@@ -217,17 +220,21 @@ def pct_above_52w_low(close: pd.Series) -> float | None:
     return (last - low) / low * 100.0
 
 
-def passes_trend_template(df: pd.DataFrame) -> bool:
+def passes_trend_template(df: pd.DataFrame, days_per_year: int = TRADING_DAYS_PER_YEAR) -> bool:
     """
     Simplified version of Minervini's "Trend Template": price above its
     50- and 200-day moving averages with the 50-day above the 200-day
     (an established uptrend / golden cross), trading well clear of its
     52-week low, and not too extended below its 52-week high.
+
+    days_per_year defaults to the equity trading-day calendar (252); pass
+    365 for an asset that trades every calendar day (crypto) so "52-week"
+    covers an actual trailing year instead of ~8-9 months of data.
     """
     close = df["Close"]
     trend = mc.trend_and_volume(df)
-    off_high = mc.pct_off_52w_high(close)
-    above_low = pct_above_52w_low(close)
+    off_high = mc.pct_off_52w_high(close, days_per_year)
+    above_low = pct_above_52w_low(close, days_per_year)
 
     if not (trend["above_50ma"] and trend["above_200ma"] and trend["golden_cross"]):
         return False
@@ -277,9 +284,13 @@ def vcp_score(info: dict) -> float:
     )
 
 
-def compute_vcp_factors(df: pd.DataFrame, window: int = 5, lookback_days: int = 180) -> dict:
-    """Per-stock VCP factor bundle for the app layer. NaN/None-safe."""
-    trend_ok = passes_trend_template(df)
+def compute_vcp_factors(df: pd.DataFrame, window: int = 5, lookback_days: int = 180,
+                         days_per_year: int = TRADING_DAYS_PER_YEAR) -> dict:
+    """Per-stock VCP factor bundle for the app layer. NaN/None-safe.
+
+    days_per_year defaults to the equity trading-day calendar (252); pass
+    365 for an asset that trades every calendar day (crypto)."""
+    trend_ok = passes_trend_template(df, days_per_year)
     info = detect_contractions(df, window=window, lookback_days=lookback_days)
     score = vcp_score(info) if trend_ok else 0.0
 
@@ -301,19 +312,24 @@ def compute_vcp_factors(df: pd.DataFrame, window: int = 5, lookback_days: int = 
 
 
 def compute_universe_vcp(price_data: dict[str, pd.DataFrame], bench_ticker: str,
-                           window: int = 5, lookback_days: int = 180) -> pd.DataFrame:
+                           window: int = 5, lookback_days: int = 180,
+                           days_per_year: int = TRADING_DAYS_PER_YEAR) -> pd.DataFrame:
     """
     price_data: {ticker: OHLCV DataFrame}, as produced by data_fetch.download_price_history.
     Returns one row per non-benchmark ticker with compute_vcp_factors() output
     plus a 'ticker' column. Unfiltered/unranked -- the app layer filters by
     is_vcp_candidate / num_contractions / is_breakout and sorts by vcp_score.
+
+    days_per_year defaults to the equity trading-day calendar (252); pass
+    365 for an asset that trades every calendar day (crypto).
     """
     rows = []
     for ticker, df in price_data.items():
         if ticker == bench_ticker:
             continue
         try:
-            factors = compute_vcp_factors(df, window=window, lookback_days=lookback_days)
+            factors = compute_vcp_factors(df, window=window, lookback_days=lookback_days,
+                                           days_per_year=days_per_year)
         except Exception:
             continue
         factors["ticker"] = ticker

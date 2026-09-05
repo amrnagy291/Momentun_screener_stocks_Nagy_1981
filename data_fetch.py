@@ -17,7 +17,30 @@ import pandas as pd
 import requests
 
 BENCHMARK_TICKER = "SPY"  # liquid, easy proxy for the S&P 500 index itself
+CRYPTO_BENCHMARK_TICKER = "BTC-USD"  # crypto's relative-strength benchmark, the way SPY is for stocks
 WIKI_SP500_URL = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
+
+# A static, curated list of established cryptocurrencies (yfinance's "TICKER-USD"
+# pair format). Excludes Bitcoin itself (used as CRYPTO_BENCHMARK_TICKER above,
+# not ranked against itself -- the same way SPY isn't ranked among S&P 500
+# stocks) and major stablecoins (pegged to $1, so "momentum" is meaningless).
+# Unlike the S&P 500 / all-US-stocks lists, there's no single authoritative,
+# easy-to-fetch-live "top US-listed stocks" equivalent for crypto that reliably
+# maps to yfinance tickers, so this list is maintained by hand and will drift
+# out of date over time (new coins won't appear, delisted ones will linger
+# harmlessly -- they just fail to download and get skipped). Feel free to
+# add/remove entries, as long as yfinance recognizes the "-USD" pair.
+CRYPTO_TICKERS = [
+    "ETH-USD", "BNB-USD", "SOL-USD", "XRP-USD", "DOGE-USD", "ADA-USD", "TRX-USD",
+    "AVAX-USD", "LINK-USD", "TON-USD", "SHIB-USD", "DOT-USD", "BCH-USD", "LTC-USD",
+    "NEAR-USD", "UNI-USD", "APT-USD", "ICP-USD", "ETC-USD", "XLM-USD", "ATOM-USD",
+    "FIL-USD", "HBAR-USD", "ARB-USD", "OP-USD", "VET-USD", "MKR-USD", "IMX-USD",
+    "AAVE-USD", "ALGO-USD", "GRT-USD", "RUNE-USD", "SAND-USD", "MANA-USD",
+    "THETA-USD", "FTM-USD", "EOS-USD", "XTZ-USD", "KAVA-USD", "CRV-USD", "SNX-USD",
+    "COMP-USD", "ZEC-USD", "DASH-USD", "CHZ-USD", "BAT-USD", "WAVES-USD",
+    "KSM-USD", "CELO-USD", "XMR-USD", "GALA-USD", "LDO-USD", "INJ-USD", "SUI-USD",
+    "STX-USD", "QNT-USD", "EGLD-USD", "FLOW-USD",
+]
 
 # NASDAQ Trader's official symbol directory: nasdaqlisted.txt covers Nasdaq,
 # otherlisted.txt covers NYSE / NYSE American / NYSE Arca / Cboe BZX / IEX.
@@ -140,20 +163,29 @@ def get_all_us_tickers() -> list[str]:
         return get_sp500_tickers()
 
 
+def get_crypto_tickers() -> list[str]:
+    """Returns the static curated crypto ticker list (see CRYPTO_TICKERS above)."""
+    return list(CRYPTO_TICKERS)
+
+
 def download_price_history(tickers: list[str], period: str = "2y", batch_size: int = 50,
-                            pause_seconds: float = 1.0, progress_callback=None) -> dict[str, pd.DataFrame]:
+                            pause_seconds: float = 1.0, progress_callback=None,
+                            benchmark_ticker: str = BENCHMARK_TICKER) -> dict[str, pd.DataFrame]:
     """
     Download OHLCV history for a list of tickers (plus the benchmark) via
     yfinance, in batches to stay polite to the API. Returns a dict of
     {ticker: DataFrame} with columns Open/High/Low/Close/Volume, dropping
     any ticker that failed to download or has too little history.
 
+    benchmark_ticker defaults to SPY (stocks); pass CRYPTO_BENCHMARK_TICKER
+    ("BTC-USD") when downloading a crypto universe instead.
+
     progress_callback(done_count, total_count) is called after each batch
     if provided, so a UI can show a progress bar.
     """
     import yfinance as yf
 
-    all_tickers = list(dict.fromkeys(tickers + [BENCHMARK_TICKER]))
+    all_tickers = list(dict.fromkeys(tickers + [benchmark_ticker]))
     results: dict[str, pd.DataFrame] = {}
 
     for i in range(0, len(all_tickers), batch_size):
